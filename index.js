@@ -19,7 +19,7 @@ try {
 
 // Initialize Firebase Admin SDK
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert(JSON.parse(process.env.GOOGLE_CREDENTIALS)),
 });
 
 // Firestore DB instance
