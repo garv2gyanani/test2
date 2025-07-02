@@ -94,7 +94,6 @@ app.get("/share/video/:videoId", async (req, res) => {
       description = data.description || description;
       thumbnailUrl = data.thumbnailUrl || thumbnailUrl;
 
-      // add new fields
       category = data.category || "";
       director = data.director || "";
       duration = data.duration || "";
@@ -134,7 +133,7 @@ app.get("/share/video/:videoId", async (req, res) => {
       storeName = "our website";
     }
 
-    // HTML with enhanced meta tags
+    // HTML with corrected meta tags
     const htmlResponse = `
       <!DOCTYPE html>
       <html>
@@ -147,9 +146,7 @@ app.get("/share/video/:videoId", async (req, res) => {
           <meta property="og:description" content="${description}" />
           <meta property="og:image" content="${thumbnailUrl}" />
           <meta property="og:type" content="video.other" />
-          <meta property="og:video:url" content="${videoUrl}" />
-          <meta property="og:video:type" content="video/mp4" />
-          
+
           <!-- Twitter -->
           <meta name="twitter:card" content="summary_large_image">
           <meta name="twitter:title" content="${title}">
