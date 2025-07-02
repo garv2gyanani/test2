@@ -1,68 +1,76 @@
+// Import required libraries
 const express = require("express");
-const crypto = require("crypto");
+const admin = require("firebase-admin");
+const axios = require("axios");
 const path = require("path");
+const fs = require("fs");
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// In-memory storage (use database in production)
-const links = new Map();
-
-// Middleware
-app.use(express.json());
-app.use(express.static("public"));
-
-// App configuration
-const APP_CONFIG = {
-  appName: "YourAppName",
-  androidPackage: "com.yourcompany.yourapp",
-  iosAppId: "123456789", // Your iOS App Store ID
-  androidScheme: "yourapp",
-  iosScheme: "yourapp",
-  playStoreUrl:
-    "https://play.google.com/store/apps/details?id=com.yourcompany.yourapp",
-  appStoreUrl: "https://apps.apple.com/app/id123456789",
-  fallbackUrl: "https://yourwebsite.com",
-};
-
-// Generate unique link ID
-function generateLinkId() {
-  return crypto.randomBytes(8).toString("hex");
+// Load your Firebase service account credentials
+let serviceAccount;
+try {
+  serviceAccount = require("./serviceAccountKey.json");
+} catch (error) {
+  console.error("Error loading service account key:", error.message);
+  console.error(
+    "Please make sure serviceAccountKey.json exists and is valid JSON"
+  );
+  process.exit(1);
 }
 
-// Create dynamic link
-// app.post("/api/create-link", (req, res) => {
-//   try {
-//     const { path: deepLinkPath, title, description, imageUrl, data } = req.body;
+// Initialize Firebase Admin SDK
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
-//     if (!deepLinkPath) {
-//       return res.status(400).json({ error: "Deep link path is required" });
-//     }
+// Firestore DB instance
+const db = admin.firestore();
 
-//     const linkId = generateLinkId();
-//     const dynamicLink = `${req.protocol}://${req.get("host")}/link/${linkId}`;
+// Initialize Express app
+const app = express();
 
-//     // Store link data
-//     links.set(linkId, {
-//       id: linkId,
-//       path: deepLinkPath,
-//       title: title || "Check out this content",
-//       description: description || "Open in app for the best experience",
-//       imageUrl: imageUrl || "",
-//       data: data || {},
-//       createdAt: new Date(),
-//       clicks: 0,
-//     });
+// Middleware
+app.use(
+  express.json({
+    limit: "50mb",
+    verify: (req, res, buf) => {
+      try {
+        if (buf.length > 0) JSON.parse(buf.toString());
+      } catch (e) {
+        console.error("⚠️ Invalid JSON received:", e.message);
+        throw new Error("Invalid JSON format");
+      }
+    },
+  })
+);
 
-//     res.json({
-//       success: true,
-//       dynamicLink,
-//       linkId,
-//     });
-//   } catch (error) {
-//     console.error("Error creating link:", error);
-//     res.status(500).json({ error: "Failed to create dynamic link" });
-//   }
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Helper: generate OTP
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Helper: format phone number
+function formatPhoneNumber(phone) {
+  if (!phone) return null;
+  if (phone.startsWith("+")) return phone;
+  if (phone.length === 10) return `+91${phone}`;
+  if (phone.startsWith("91") && phone.length === 12) return `+${phone}`;
+  return `+${phone}`;
+}
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res.status(400).json({ message: "Invalid JSON payload" });
+  }
+  next(err);
+});
+
 app.get("/share/video/:videoId", async (req, res) => {
   const { videoId } = req.params;
 
@@ -194,288 +202,218 @@ app.get("/share/video/:videoId", async (req, res) => {
   }
 });
 
-// // Handle dynamic link clicks
-// app.get("/link/:linkId", (req, res) => {
-//   const { linkId } = req.params;
-//   const linkData = links.get(linkId);
+app.post("/checkUserExists", async (req, res) => {
+  const { phone } = req.body;
+  if (!phone)
+    return res.status(400).json({ message: "Phone number is required" });
 
-//   if (!linkData) {
-//     return res.status(404).send("Link not found");
-//   }
-
-//   // Update click count
-//   linkData.clicks++;
-
-//   // Get user agent for platform detection
-//   const userAgent = req.get("User-Agent") || "";
-//   const isAndroid = /android/i.test(userAgent);
-//   const isIOS = /iPad|iPhone|iPod/.test(userAgent);
-//   const isMobile = isAndroid || isIOS;
-
-//   // Generate the HTML response with detection logic
-//   const html = generateLinkHTML(linkData, isAndroid, isIOS, isMobile);
-
-//   res.send(html);
-// });
-
-// // Generate HTML with app detection and redirect logic
-// function generateLinkHTML(linkData, isAndroid, isIOS, isMobile) {
-//   const deepLink = isAndroid
-//     ? `${APP_CONFIG.androidScheme}://${linkData.path}`
-//     : `${APP_CONFIG.iosScheme}://${linkData.path}`;
-
-//   const storeUrl = isAndroid ? APP_CONFIG.playStoreUrl : APP_CONFIG.appStoreUrl;
-
-//   return `
-// <!DOCTYPE html>
-// <html lang="en">
-// <head>
-//     <meta charset="UTF-8">
-//     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-//     <title>${linkData.title}</title>
-    
-//     <!-- Open Graph meta tags for social sharing -->
-//     <meta property="og:title" content="${linkData.title}">
-//     <meta property="og:description" content="${linkData.description}">
-//     <meta property="og:image" content="${linkData.imageUrl}">
-//     <meta property="og:type" content="website">
-    
-//     <!-- Twitter Card meta tags -->
-//     <meta name="twitter:card" content="summary_large_image">
-//     <meta name="twitter:title" content="${linkData.title}">
-//     <meta name="twitter:description" content="${linkData.description}">
-//     <meta name="twitter:image" content="${linkData.imageUrl}">
-
-//     <style>
-//         body {
-//             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-//             margin: 0;
-//             padding: 20px;
-//             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-//             min-height: 100vh;
-//             display: flex;
-//             align-items: center;
-//             justify-content: center;
-//         }
-        
-//         .container {
-//             background: white;
-//             border-radius: 12px;
-//             padding: 30px;
-//             max-width: 400px;
-//             text-align: center;
-//             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-//         }
-        
-//         .app-icon {
-//             width: 80px;
-//             height: 80px;
-//             background: #007AFF;
-//             border-radius: 16px;
-//             margin: 0 auto 20px;
-//             display: flex;
-//             align-items: center;
-//             justify-content: center;
-//             font-size: 32px;
-//             color: white;
-//         }
-        
-//         h1 {
-//             color: #333;
-//             margin-bottom: 10px;
-//             font-size: 24px;
-//         }
-        
-//         p {
-//             color: #666;
-//             margin-bottom: 30px;
-//             line-height: 1.5;
-//         }
-        
-//         .btn {
-//             display: inline-block;
-//             padding: 12px 24px;
-//             background: #007AFF;
-//             color: white;
-//             text-decoration: none;
-//             border-radius: 8px;
-//             font-weight: 600;
-//             margin: 10px;
-//             transition: background 0.3s;
-//         }
-        
-//         .btn:hover {
-//             background: #0056b3;
-//         }
-        
-//         .loading {
-//             display: none;
-//             color: #666;
-//             margin-top: 20px;
-//         }
-        
-//         .spinner {
-//             border: 2px solid #f3f3f3;
-//             border-top: 2px solid #007AFF;
-//             border-radius: 50%;
-//             width: 20px;
-//             height: 20px;
-//             animation: spin 1s linear infinite;
-//             display: inline-block;
-//             margin-right: 10px;
-//         }
-        
-//         @keyframes spin {
-//             0% { transform: rotate(0deg); }
-//             100% { transform: rotate(360deg); }
-//         }
-//     </style>
-// </head>
-// <body>
-//     <div class="container">
-//         <div class="app-icon">📱</div>
-//         <h1>${linkData.title}</h1>
-//         <p>${linkData.description}</p>
-        
-//         <div id="buttons">
-//             <a href="#" id="openApp" class="btn">Open in App</a>
-//             <a href="${storeUrl}" id="downloadApp" class="btn">Download App</a>
-//         </div>
-        
-//         <div id="loading" class="loading">
-//             <div class="spinner"></div>
-//             Opening app...
-//         </div>
-//     </div>
-
-//     <script>
-//         const linkData = ${JSON.stringify(linkData)};
-//         const isAndroid = ${isAndroid};
-//         const isIOS = ${isIOS};
-//         const isMobile = ${isMobile};
-//         const deepLink = "${deepLink}";
-//         const storeUrl = "${storeUrl}";
-//         const fallbackUrl = "${APP_CONFIG.fallbackUrl}";
-
-//         let appOpened = false;
-//         let timeout;
-
-//         function openApp() {
-//             if (!isMobile) {
-//                 window.open(fallbackUrl, '_blank');
-//                 return;
-//             }
-
-//             document.getElementById('loading').style.display = 'block';
-//             document.getElementById('buttons').style.display = 'none';
-            
-//             appOpened = false;
-
-//             // Try to open the app
-//             if (isAndroid) {
-//                 // Android intent fallback
-//                 const intentUrl = \`intent://\${linkData.path}#Intent;scheme=\${deepLink.split('://')[0]};package=${
-//                   APP_CONFIG.androidPackage
-//                 };S.browser_fallback_url=\${encodeURIComponent(storeUrl)};end\`;
-//                 window.location.href = intentUrl;
-                
-//                 // Fallback after timeout
-//                 timeout = setTimeout(() => {
-//                     if (!appOpened) {
-//                         window.location.href = storeUrl;
-//                     }
-//                 }, 2500);
-//             } else if (isIOS) {
-//                 // iOS Universal Links or Custom Scheme
-//                 window.location.href = deepLink;
-                
-//                 // Fallback after timeout
-//                 timeout = setTimeout(() => {
-//                     if (!appOpened) {
-//                         window.location.href = storeUrl;
-//                     }
-//                 }, 2500);
-//             }
-
-//             // Detect if app opened (page visibility change)
-//             document.addEventListener('visibilitychange', () => {
-//                 if (document.hidden) {
-//                     appOpened = true;
-//                     clearTimeout(timeout);
-//                 }
-//             });
-
-//             // Detect if user returns to page (app not installed)
-//             window.addEventListener('focus', () => {
-//                 clearTimeout(timeout);
-//                 document.getElementById('loading').style.display = 'none';
-//                 document.getElementById('buttons').style.display = 'block';
-//             });
-//         }
-
-//         // Auto-redirect on mobile
-//         if (isMobile) {
-//             // Wait a bit for the page to load, then auto-open
-//             setTimeout(openApp, 1000);
-//         }
-
-//         // Manual button click
-//         document.getElementById('openApp').addEventListener('click', (e) => {
-//             e.preventDefault();
-//             openApp();
-//         });
-
-//         // Send analytics data back to server
-//         fetch('/api/link-clicked', {
-//             method: 'POST',
-//             headers: {
-//                 'Content-Type': 'application/json'
-//             },
-//             body: JSON.stringify({
-//                 linkId: linkData.id,
-//                 userAgent: navigator.userAgent,
-//                 platform: isAndroid ? 'android' : isIOS ? 'ios' : 'web'
-//             })
-//         }).catch(console.error);
-//     </script>
-// </body>
-// </html>`;
-// }
-
-// // Track link clicks
-// app.post("/api/link-clicked", (req, res) => {
-//   const { linkId, userAgent, platform } = req.body;
-
-//   // Here you would typically store analytics data
-//   console.log("Link clicked:", { linkId, platform, userAgent });
-
-//   res.json({ success: true });
-// });
-
-// Get link analytics
-app.get("/api/link/:linkId/stats", (req, res) => {
-  const { linkId } = req.params;
-  const linkData = links.get(linkId);
-
-  if (!linkData) {
-    return res.status(404).json({ error: "Link not found" });
+  const formattedPhone = formatPhoneNumber(phone);
+  try {
+    try {
+      await admin.auth().getUserByPhoneNumber(formattedPhone);
+      return res.status(200).json({ exists: true });
+    } catch (authError) {
+      if (authError.code === "auth/user-not-found") {
+        const snapshot = await db
+          .collection("users")
+          .where("phone", "==", phone)
+          .limit(1)
+          .get();
+        return res.status(200).json({ exists: !snapshot.empty });
+      } else {
+        throw authError;
+      }
+    }
+  } catch (error) {
+    return res
+      .status(500)
+      .json({ message: "Internal server error during user check" });
   }
+});
 
-  res.json({
-    linkId,
-    clicks: linkData.clicks,
-    createdAt: linkData.createdAt,
-    title: linkData.title,
+app.post("/sendOtp", async (req, res) => {
+  const { phone } = req.body;
+  if (!phone)
+    return res.status(400).json({ message: "Phone number is required" });
+
+  const demoNumber = "9057290632";
+  let otp = phone === demoNumber ? "123456" : generateOTP();
+
+  try {
+    await db.collection("otp_requests").doc(phone).set({
+      otp,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const smsMessage = `Dear User, your OTP is ${otp}. Do not share it with anyone. Valid for 5 minutes. -Team Videos Alarm`;
+    const smsUrl = `https://smpp1.sms24hours.com/SMSApi/send?userid=ccfeltd&password=Eq5Q79b6&sendMethod=quick&mobile=${phone}&msg=${encodeURIComponent(
+      smsMessage
+    )}&senderid=VALARM&msgType=text&dltEntityId=1401613590000051630&dltTemplateId=1407174401860143284&duplicatecheck=true&output=json`;
+
+    const response = await axios.get(smsUrl);
+    res.status(200).json({ message: "OTP sent" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to send OTP", error: err.message });
+  }
+});
+
+app.post("/verifyOtp", async (req, res) => {
+  const { phone, otp } = req.body;
+  if (!phone || !otp)
+    return res.status(400).json({ message: "Phone and OTP are required" });
+
+  try {
+    const docRef = db.collection("otp_requests").doc(phone);
+    const doc = await docRef.get();
+
+    if (!doc.exists)
+      return res.status(400).json({ message: "OTP not found or already used" });
+
+    const data = doc.data();
+    const createdAt = data.createdAt?.toDate();
+    const now = new Date();
+    const timeDiff = (now - createdAt) / 1000;
+
+    const isDemo = phone === "9057290632";
+    const isOtpValid = isDemo ? otp === "123456" : data.otp === otp;
+
+    if (!isOtpValid) return res.status(400).json({ message: "Invalid OTP" });
+    if (timeDiff > 300) {
+      await docRef.delete();
+      return res.status(400).json({ message: "OTP expired" });
+    }
+
+    const formattedPhone = formatPhoneNumber(phone);
+    let userRecord;
+
+    try {
+      userRecord = await admin.auth().getUserByPhoneNumber(formattedPhone);
+    } catch (error) {
+      if (error.code === "auth/user-not-found") {
+        userRecord = await admin
+          .auth()
+          .createUser({ phoneNumber: formattedPhone });
+        await db.collection("users").doc(userRecord.uid).set({
+          phone: phone,
+          phoneFormatted: formattedPhone,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    const customToken = await admin.auth().createCustomToken(userRecord.uid);
+    await docRef.delete();
+
+    res.status(200).json({
+      token: customToken,
+      uid: userRecord.uid,
+      message: "OTP verified and token generated",
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Internal server error during OTP verification",
+      error: err.message,
+    });
+  }
+});
+
+// ===== File Deletion =====
+app.delete("/deleteImage/:filename", (req, res) => {
+  const filename = req.params.filename;
+  const filepath = path.join(uploadsDir, filename);
+
+  fs.unlink(filepath, (err) => {
+    if (err) {
+      if (err.code === "ENOENT")
+        return res.status(404).json({ message: "File not found" });
+      return res.status(500).json({ message: "Error deleting file" });
+    }
+    res.status(200).json({ message: "File deleted successfully" });
   });
 });
 
-// Health check
+// ===== Health Check =====
 app.get("/health", (req, res) => {
-  res.json({ status: "OK", timestamp: new Date() });
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
-  console.log(`Dynamic Link Service running on port ${PORT}`);
-  console.log(`Create links: POST /api/create-link`);
-  console.log(`View links: GET /link/:linkId`);
+// ===== NEW: Send Video Notification with Dynamic Title =====
+app.post("/sendVideoNotification", async (req, res) => {
+  const { title } = req.body;
+
+  if (!title) {
+    return res.status(400).json({ message: "Title is required" });
+  }
+
+  const message = {
+    notification: {
+      title: "New Video Uploaded!",
+      body: `${title} is now available to watch.`,
+    },
+    data: {
+      click_action: "FLUTTER_NOTIFICATION_CLICK",
+      title: "New Video Uploaded!",
+      body: `${title} is now available to watch.`,
+    },
+    topic: "new-videos",
+    apns: {
+      payload: {
+        aps: {
+          alert: {
+            title: "New Video Uploaded!",
+            body: `${title} is now available to watch.`,
+          },
+          sound: "default",
+        },
+      },
+      headers: {
+        "apns-priority": "10",
+      },
+    },
+  };
+
+  try {
+    const response = await admin.messaging().send(message);
+    res.status(200).json({ message: "Notification sent", id: response });
+  } catch (error) {
+    console.error("Error sending notification:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to send notification", error: error.message });
+  }
 });
+
+// ===== Server Setup =====
+function startServer(port) {
+  const server = app
+    .listen(port, () => {
+      console.log(`✅ Server running on http://localhost:${port}`);
+    })
+    .on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.warn(
+          `⚠️ Port ${port} is already in use, trying ${port + 1}...`
+        );
+        startServer(port + 1);
+      } else {
+        console.error("❌ Server error:", err);
+      }
+    });
+}
+
+const PORT = process.env.PORT || 3066;
+startServer(PORT);
+
+process.on("SIGTERM", () => {
+  console.log("👋 SIGTERM received, shutting down gracefully");
+  process.exit(0);
+});
+
+process.on("SIGINT", () => {
+  console.log("👋 SIGINT received, shutting down gracefully");
+  process.exit(0);
+});
+
+module.exports = app;
