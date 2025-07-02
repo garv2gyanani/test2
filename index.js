@@ -8,7 +8,7 @@ const fs = require("fs");
 // Load your Firebase service account credentials
 let serviceAccount;
 try {
-  serviceAccount = require("./serviceAccountKey.json");
+  serviceAccount = require(JSON.parse(process.env.GOOGLE_CREDENTIALS));
 } catch (error) {
   console.error("Error loading service account key:", error.message);
   console.error(
