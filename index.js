@@ -8,18 +8,15 @@ const fs = require("fs");
 // Load your Firebase service account credentials
 let serviceAccount;
 try {
-  serviceAccount = require(JSON.parse(process.env.GOOGLE_CREDENTIALS));
+  serviceAccount = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 } catch (error) {
   console.error("Error loading service account key:", error.message);
-  console.error(
-    "Please make sure serviceAccountKey.json exists and is valid JSON"
-  );
+  console.error("Please make sure GOOGLE_CREDENTIALS env var is valid JSON");
   process.exit(1);
 }
 
-// Initialize Firebase Admin SDK
 admin.initializeApp({
-  credential: admin.credential.cert(JSON.parse(process.env.GOOGLE_CREDENTIALS)),
+  credential: admin.credential.cert(serviceAccount),
 });
 
 // Firestore DB instance
